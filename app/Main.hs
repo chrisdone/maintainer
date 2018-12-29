@@ -49,8 +49,9 @@ main = do
   let repos = mapMaybe (getWantedRepo config) reposjson
   issues <-
     fmap
-      (sortBy (comparing (\(_name, _title, _url, String updated) -> updated)) .
-       take (configLimit config) . concat)
+      (take (configLimit config) .
+       sortBy (comparing (\(_title, _url, String updated) -> updated)) .
+       concat . map (take 1))
       (mapM
          (\fullName -> do
             issues <-
@@ -70,15 +71,17 @@ main = do
                    "/issues?state=open&sort=updated&direction=asc&per_page=" ++
                    show perpage ++ "&page=" ++ show page)
             pure
-              (mapMaybe
-                 (\issue ->
-                    (fullName, , , ) <$> HM.lookup "title" issue <*>
-                    HM.lookup "html_url" issue <*>
-                    HM.lookup "updated_at" issue)
-                 issues))
+              (sortBy
+                 (comparing (\(_title, _url, String updated) -> updated))
+                 (mapMaybe
+                    (\issue ->
+                       (,,) <$> HM.lookup "title" issue <*>
+                       HM.lookup "html_url" issue <*>
+                       HM.lookup "updated_at" issue)
+                    issues)))
          repos)
   mapM_
-    (\(_name, String title, String url, String updated) ->
+    (\(String title, String url, String updated) ->
        T.putStrLn (T.unlines [title, url, updated]))
     issues
 
