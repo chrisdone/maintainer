@@ -8,6 +8,8 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
 import qualified Data.HashMap.Strict as HM
+import           Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import           Data.Yaml (decodeFileThrow)
 import           Network.HTTP.Client
@@ -18,12 +20,14 @@ import           System.Directory
 data Config = Config
   { configUsername :: ByteString
   , configToken :: ByteString
+  , configIgnore :: [Text]
   }
 
 instance FromJSON Config where
   parseJSON j = do
     o <- parseJSON j
-    Config <$> fmap S8.pack (o .: "username") <*> fmap S8.pack (o .: "token")
+    Config <$> fmap S8.pack (o .: "username") <*> fmap S8.pack (o .: "token") <*>
+      (o .: "ignore")
 
 main :: IO ()
 main = do
@@ -45,7 +49,26 @@ main = do
                   show perpage ++ "&page=" ++ show page)
            L.writeFile cachefile (encode results)
            pure results
-  mapM_ (maybe (pure ()) print . HM.lookup "full_name") results
+  mapM_
+    (\result ->
+       case HM.lookup "full_name" result of
+         Just (String fullName) ->
+           if any
+                (\ignored ->
+                   if T.isSuffixOf "/" ignored
+                     then T.isPrefixOf ignored fullName
+                     else ignored == fullName)
+                (configIgnore config) ||
+              HM.lookup "archived" result == Just (Bool True) ||
+              HM.lookup "private" result == Just (Bool True)
+             then pure ()
+             else T.putStrLn
+                    (fullName <> " " <>
+                     (if HM.lookup "fork" result == Just (Bool True)
+                        then "(fork)"
+                        else ""))
+         _ -> pure ())
+    results
   where
     cachefile = "maintainer.json"
 
