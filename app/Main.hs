@@ -120,15 +120,12 @@ downloadPaginated auth makeUrl = do
   where
     go manager page acc = do
       request <-
-        fmap
-          (uncurry applyBasicAuth auth)
-          (parseRequest (makeUrl perpage page))
+        fmap (uncurry applyBasicAuth auth) (parseRequest (makeUrl perpage page))
       response <-
         httpLbs
           request
             { requestHeaders =
-                requestHeaders request <>
-                [("User-Agent", "maintainer")]
+                requestHeaders request <> [("User-Agent", "maintainer")]
             }
           manager
       case statusCode (responseStatus response) of
@@ -136,8 +133,7 @@ downloadPaginated auth makeUrl = do
           case eitherDecode (responseBody response) >>= parseEither parseJSON of
             Left e -> error ("Couldn't decode JSON: " ++ e)
             Right ns -> do
-              do print (length ns)
-                 if length ns == perpage
+              do if length ns == perpage
                    then go manager (page + 1) (ns : acc)
                    else pure (concat (ns : acc))
         _ -> error ("Bad status code: " ++ show response)
