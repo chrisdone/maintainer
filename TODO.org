@@ -1,0 +1,6 @@
+* DONE Ensure fair distribution of effort by cycling different repos displayed in top results
+  CLOSED: [2018-12-29 Sat 23:41]
+  - State "DONE"       from "TODO"       [2018-12-29 Sat 23:41]
+* TODO Ignore issues for which I am not the assignee
+* TODO Support commands that summarize the "health" of your different repos (judged by staleness of issues)
+* TODO Support convenient re-caching of issue data (maybe just refresh the cache once per day?)
