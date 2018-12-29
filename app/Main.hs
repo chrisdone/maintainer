@@ -7,6 +7,8 @@ import           Data.Aeson.Types
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy.Char8 as L8
+import           Data.Char
 import qualified Data.HashMap.Strict as HM
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -32,23 +34,14 @@ instance FromJSON Config where
 main :: IO ()
 main = do
   config <- decodeFileThrow "maintainer.yaml"
-  results <-
-    do exists <- doesFileExist cachefile
-       if exists
-         then do
-           bytes <- L.readFile cachefile
-           case decode bytes of
-             Just as -> pure as
-             Nothing -> error "Couldn't read repos.json. Delete it?"
-         else do
-           results <-
-             downloadPaginated
-               (configUsername config, configToken config)
-               (\perpage page ->
-                  "https://api.github.com/user/repos?per_page=" ++
-                  show perpage ++ "&page=" ++ show page)
-           L.writeFile cachefile (encode results)
-           pure results
+  createDirectoryIfMissing True "data"
+  repos <-
+    getCachedResource
+      config
+      "data/repos.json"
+      (\perpage page ->
+         "https://api.github.com/user/repos?per_page=" ++
+         show perpage ++ "&page=" ++ show page)
   mapM_
     (\result ->
        case HM.lookup "full_name" result of
@@ -62,15 +55,43 @@ main = do
               HM.lookup "archived" result == Just (Bool True) ||
               HM.lookup "private" result == Just (Bool True)
              then pure ()
-             else T.putStrLn
-                    (fullName <> " " <>
-                     (if HM.lookup "fork" result == Just (Bool True)
-                        then "(fork)"
-                        else ""))
+             else do
+               T.putStrLn fullName
+               issues <-
+                 getCachedResource
+                   config
+                   ("data/issues." <>
+                    T.unpack
+                      (T.map
+                         (\c ->
+                            if isAlphaNum c
+                              then c
+                              else '.')
+                         fullName) <>
+                    ".json")
+                   (\perpage page ->
+                      "https://api.github.com/repos/" <> T.unpack fullName <>
+                      "/issues?state=open&sort=updated&direction=asc&per_page=" ++
+                      show perpage ++ "&page=" ++ show page)
+               -- mapM_ (L8.putStrLn . encode) issues
+               pure ()
          _ -> pure ())
-    results
-  where
-    cachefile = "repos.json"
+    repos
+
+getCachedResource :: Config -> FilePath -> (Int -> Int -> String) -> IO [Object]
+getCachedResource config cachefile mkurl = do
+  exists <- doesFileExist cachefile
+  if exists
+    then do
+      bytes <- L.readFile cachefile
+      case decode bytes of
+        Just as -> pure as
+        Nothing -> error "Couldn't read repos.json. Delete it?"
+    else do
+      results <-
+        downloadPaginated (configUsername config, configToken config) mkurl
+      L.writeFile cachefile (encode results)
+      pure results
 
 downloadPaginated :: (ByteString,ByteString) -> (Int -> Int -> String) -> IO [Object]
 downloadPaginated auth makeUrl = do
