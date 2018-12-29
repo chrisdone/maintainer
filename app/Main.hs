@@ -5,20 +5,27 @@ module Main where
 import           Data.Aeson
 import           Data.Aeson.Types
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
-import           Data.Char
+import           Data.Yaml (decodeFileThrow)
 import           Network.HTTP.Client
 import           Network.HTTP.Client.TLS
 import           Network.HTTP.Types.Status (statusCode)
 import           System.Directory
-import           System.Environment
+
+data Config = Config
+  { configUsername :: ByteString
+  , configToken :: ByteString
+  }
+
+instance FromJSON Config where
+  parseJSON j = do
+    o <- parseJSON j
+    Config <$> fmap S8.pack (o .: "username") <*> fmap S8.pack (o .: "token")
 
 main :: IO ()
 main = do
-  user:tokenfp:_ <- getArgs
-  token <- fmap (S8.takeWhile isAlphaNum) (S.readFile tokenfp)
+  config <- decodeFileThrow "maintainer.yaml"
   results <-
     do exists <- doesFileExist cachefile
        if exists
@@ -30,7 +37,7 @@ main = do
          else do
            results <-
              downloadPaginated
-               (S8.pack user, token)
+               (configUsername config, configToken config)
                (\perpage page ->
                   "https://api.github.com/user/repos?per_page=" ++
                   show perpage ++ "&page=" ++ show page)
