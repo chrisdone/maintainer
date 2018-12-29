@@ -70,7 +70,7 @@ main = do
          _ -> pure ())
     results
   where
-    cachefile = "maintainer.json"
+    cachefile = "repos.json"
 
 downloadPaginated :: (ByteString,ByteString) -> (Int -> Int -> String) -> IO [Object]
 downloadPaginated auth makeUrl = do
