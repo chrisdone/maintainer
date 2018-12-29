@@ -7,6 +7,8 @@ import           Data.Aeson.Types
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Text.IO as T
 import           Data.Yaml (decodeFileThrow)
 import           Network.HTTP.Client
 import           Network.HTTP.Client.TLS
@@ -43,11 +45,11 @@ main = do
                   show perpage ++ "&page=" ++ show page)
            L.writeFile cachefile (encode results)
            pure results
-  putStrLn (take 512 (show results))
+  mapM_ (maybe (pure ()) print . HM.lookup "full_name") results
   where
-    cachefile = "repos.json"
+    cachefile = "maintainer.json"
 
-downloadPaginated :: (ByteString,ByteString) -> (Int -> Int -> String) -> IO [Value]
+downloadPaginated :: (ByteString,ByteString) -> (Int -> Int -> String) -> IO [Object]
 downloadPaginated auth makeUrl = do
   manager <- newManager tlsManagerSettings
   go manager 1 []
