@@ -21,19 +21,26 @@ import           Network.HTTP.Client
 import           Network.HTTP.Client.TLS
 import           Network.HTTP.Types.Status (statusCode)
 import           System.Directory
+import           System.Environment
+import           Text.Printf
 
 data Config = Config
   { configUsername :: ByteString
   , configToken :: ByteString
   , configIgnore :: [Text]
   , configLimit :: Int
+  , configHideIssueless :: Bool
+  , configStalenessDays :: Integer
   }
 
 instance FromJSON Config where
   parseJSON j = do
     o <- parseJSON j
     Config <$> fmap S8.pack (o .: "username") <*> fmap S8.pack (o .: "token") <*>
-      (o .: "ignore") <*> o .: "display-limit"
+      (o .: "ignore") <*>
+      o .: "display-limit" <*>
+      o .: "hide-issueless" <*>
+      o .: "staleness-days"
 
 data Repo = Repo
   { repoPrivate :: !Bool
@@ -111,22 +118,81 @@ main = do
                  "/issues?state=open&sort=updated&direction=asc&per_page=" ++
                  show perpage ++ "&page=" ++ show page)))
       repos
-  mapM_
-    (\(_repo, is) ->
-       mapM_
-         (\issue ->
-            T.putStrLn
-              (T.unlines
-                 [ issueTitle issue
-                 , issueHtmlUrl issue
-                 , T.pack (show (issueUpdatedAt issue))
-                 ]))
-         (take 1 is))
-    (take
-       (configLimit config)
-       (sortBy
-          (comparing (map issueUpdatedAt . snd))
-          (filter (not . null . snd) issues)))
+  args <- getArgs
+  now <- fmap utctDay getCurrentTime
+  case args of
+    ["health"] ->
+      putStrLn
+        (tablize
+           ([ (True, "Repo")
+            , (True, "Staleness")
+            , (True, "Issues")
+            , (True, "Stale issues")
+            , (True, "Avg. last update")
+            ] :
+            map
+              (\(repo, is) ->
+                 let staleIssues =
+                       (filter
+                          ((> configStalenessDays config) .
+                           diffDays now . issueUpdatedAt)
+                          is)
+                  in [ (True, T.unpack (repoFullName repo))
+                     , ( True
+                       , printf
+                           "%3.2f%%"
+                           (100 *
+                            (fromIntegral (length staleIssues) /
+                             fromIntegral (length is)) :: Float))
+                     , (True, show (length is))
+                     , (True, show (length staleIssues))
+                     , ( True
+                       , printf
+                           "%.2f days"
+                           (sum
+                              (map
+                                 (fromIntegral . diffDays now . issueUpdatedAt)
+                                 is) /
+                            fromIntegral (length is) :: Float))
+                     ])
+              (sortBy
+                 (flip (comparing (length . snd)))
+                 (filter
+                    (if configHideIssueless config
+                       then not . null . snd
+                       else const True)
+                    issues))))
+    _ ->
+      mapM_
+        (\(_repo, is) ->
+           mapM_
+             (\issue ->
+                T.putStrLn
+                  (T.unlines
+                     [ issueTitle issue
+                     , issueHtmlUrl issue
+                     , T.pack (show (issueUpdatedAt issue))
+                     ]))
+             (take 1 is))
+        (take
+           (configLimit config)
+           (sortBy
+              (comparing (map issueUpdatedAt . snd))
+              (filter (not . null . snd) issues)))
+
+-- | Make a table out of a list of rows.
+tablize :: [[(Bool,String)]] -> String
+tablize xs =
+  intercalate "\n" (map (intercalate "  " . map fill . zip [0 ..]) xs)
+  where
+    fill (x', (left, text')) =
+      printf ("%" ++ direction ++ show width ++ "s") text'
+      where
+        direction =
+          if left
+            then "-"
+            else ""
+        width = maximum (map (length . snd . (!! x')) xs)
 
 isIgnoredRepo ::Config -> Repo -> Bool
 isIgnoredRepo config repo =
