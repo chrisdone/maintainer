@@ -46,13 +46,14 @@ data Repo = Repo
   { repoPrivate :: !Bool
   , repoArchived :: !Bool
   , repoFullName :: !Text
+  , repoOpenIssuesCount :: Int
   } deriving (Show)
 
 instance FromJSON Repo where
   parseJSON j = do
     o <- parseJSON j
     Repo <$> (o .: "private") <*> (o .: "archived") <*>
-      (o .: "full_name")
+      (o .: "full_name") <*> (o .: "open_issues_count")
 
 instance ToJSON Repo where
   toJSON Repo {..} =
@@ -60,6 +61,7 @@ instance ToJSON Repo where
       [ "private" .= repoPrivate
       , "archived" .= repoArchived
       , "full_name" .= repoFullName
+      , "open_issues_count" .= repoOpenIssuesCount
       ]
 
 data Issue = Issue
@@ -203,7 +205,8 @@ isIgnoredRepo config repo =
          else ignored == (repoFullName repo))
     (configIgnore config) ||
   repoArchived repo ||
-  repoPrivate repo
+  repoPrivate repo ||
+  repoOpenIssuesCount repo == 0
 
 getCachedResource :: (FromJSON v, ToJSON v) => Config -> FilePath -> (Int -> Int -> String) -> IO [v]
 getCachedResource config cachefile mkurl = do
@@ -235,6 +238,7 @@ downloadPaginated auth makeUrl = do
                 requestHeaders request <> [("User-Agent", "maintainer")]
             }
           manager
+      putStrLn ("Downloading " ++ makeUrl perpage page)
       case statusCode (responseStatus response) of
         200 -> do
           case eitherDecode (responseBody response) >>= parseEither parseJSON of
