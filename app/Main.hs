@@ -39,7 +39,7 @@ data Repo = Repo
   { repoPrivate :: !Bool
   , repoArchived :: !Bool
   , repoFullName :: !Text
-  }
+  } deriving (Show)
 
 instance FromJSON Repo where
   parseJSON j = do
@@ -59,7 +59,7 @@ data Issue = Issue
   { issueTitle :: !Text
   , issueHtmlUrl :: !Text
   , issueUpdatedAt :: !Day
-  }
+  } deriving (Show)
 
 instance FromJSON Issue where
   parseJSON j = do
@@ -91,12 +91,11 @@ main = do
          show perpage ++ "&page=" ++ show page)
   let repos = filter (not . isIgnoredRepo config) reposjson
   issues <-
-    fmap
-      (take (configLimit config) .
-       sortBy (comparing issueUpdatedAt) . concat . map (take 1))
-      (mapM
-         (\repo ->
-            getCachedResource
+    mapM
+      (\repo ->
+         fmap
+           (repo, )
+           (getCachedResource
               config
               ("data/issues." <>
                T.unpack
@@ -110,17 +109,24 @@ main = do
               (\perpage page ->
                  "https://api.github.com/repos/" <> T.unpack (repoFullName repo) <>
                  "/issues?state=open&sort=updated&direction=asc&per_page=" ++
-                 show perpage ++ "&page=" ++ show page))
-         repos)
+                 show perpage ++ "&page=" ++ show page)))
+      repos
   mapM_
-    (\issue ->
-       T.putStrLn
-         (T.unlines
-            [ issueTitle issue
-            , issueHtmlUrl issue
-            , T.pack (show (issueUpdatedAt issue))
-            ]))
-    issues
+    (\(_repo, is) ->
+       mapM_
+         (\issue ->
+            T.putStrLn
+              (T.unlines
+                 [ issueTitle issue
+                 , issueHtmlUrl issue
+                 , T.pack (show (issueUpdatedAt issue))
+                 ]))
+         (take 1 is))
+    (take
+       (configLimit config)
+       (sortBy
+          (comparing (map issueUpdatedAt . snd))
+          (filter (not . null . snd) issues)))
 
 isIgnoredRepo ::Config -> Repo -> Bool
 isIgnoredRepo config repo =
