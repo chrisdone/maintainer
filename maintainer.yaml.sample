@@ -1,7 +1,9 @@
-username: <your github username>
-token: <your API token>
+username: <username>
+token: <token>
+display-limit: 5
+hide-issueless: true
+staleness-days: 30
 
-display-limit: 10
 ignore:
 - fooproject/repo
 # ^ this ignores just this repo
