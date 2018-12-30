@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-type-defaults #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -9,13 +10,12 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
 import           Data.Char
-import qualified Data.HashMap.Strict as HM
 import           Data.List
-import           Data.Maybe
 import           Data.Ord
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import           Data.Time
 import           Data.Yaml (decodeFileThrow)
 import           Network.HTTP.Client
 import           Network.HTTP.Client.TLS
@@ -35,6 +35,49 @@ instance FromJSON Config where
     Config <$> fmap S8.pack (o .: "username") <*> fmap S8.pack (o .: "token") <*>
       (o .: "ignore") <*> o .: "display-limit"
 
+data Repo = Repo
+  { repoPrivate :: !Bool
+  , repoArchived :: !Bool
+  , repoFullName :: !Text
+  }
+
+instance FromJSON Repo where
+  parseJSON j = do
+    o <- parseJSON j
+    Repo <$> (o .: "private") <*> (o .: "archived") <*>
+      (o .: "full_name")
+
+instance ToJSON Repo where
+  toJSON Repo {..} =
+    object
+      [ "private" .= repoPrivate
+      , "archived" .= repoArchived
+      , "full_name" .= repoFullName
+      ]
+
+data Issue = Issue
+  { issueTitle :: !Text
+  , issueHtmlUrl :: !Text
+  , issueUpdatedAt :: !Day
+  }
+
+instance FromJSON Issue where
+  parseJSON j = do
+    o <- parseJSON j
+    Issue <$> (o .: "title") <*> (o .: "html_url") <*>
+      (do v <- o .: "updated_at"
+          case parseTimeM True defaultTimeLocale "%Y-%m-%d" (take 10 v) of
+            Just u -> pure u
+            Nothing -> fail "Couldn't parse date.")
+
+instance ToJSON Issue where
+  toJSON Issue {..} =
+    object
+      [ "title" .= issueTitle
+      , "html_url" .= issueHtmlUrl
+      , "updated_at" .= formatTime defaultTimeLocale "%Y-%m-%d" issueUpdatedAt
+      ]
+
 main :: IO ()
 main = do
   config <- decodeFileThrow "maintainer.yaml"
@@ -46,62 +89,51 @@ main = do
       (\perpage page ->
          "https://api.github.com/user/repos?per_page=" ++
          show perpage ++ "&page=" ++ show page)
-  let repos = mapMaybe (getWantedRepo config) reposjson
+  let repos = filter (not . isIgnoredRepo config) reposjson
   issues <-
     fmap
       (take (configLimit config) .
-       sortBy (comparing (\(_title, _url, String updated) -> updated)) .
-       concat . map (take 1))
+       sortBy (comparing issueUpdatedAt) . concat . map (take 1))
       (mapM
-         (\fullName -> do
-            issues <-
-              getCachedResource
-                config
-                ("data/issues." <>
-                 T.unpack
-                   (T.map
-                      (\c ->
-                         if isAlphaNum c
-                           then c
-                           else '.')
-                      fullName) <>
-                 ".json")
-                (\perpage page ->
-                   "https://api.github.com/repos/" <> T.unpack fullName <>
-                   "/issues?state=open&sort=updated&direction=asc&per_page=" ++
-                   show perpage ++ "&page=" ++ show page)
-            pure
-              (sortBy
-                 (comparing (\(_title, _url, String updated) -> updated))
-                 (mapMaybe
-                    (\issue ->
-                       (,,) <$> HM.lookup "title" issue <*>
-                       HM.lookup "html_url" issue <*>
-                       HM.lookup "updated_at" issue)
-                    issues)))
+         (\repo ->
+            getCachedResource
+              config
+              ("data/issues." <>
+               T.unpack
+                 (T.map
+                    (\c ->
+                       if isAlphaNum c
+                         then c
+                         else '.')
+                    (repoFullName repo)) <>
+               ".json")
+              (\perpage page ->
+                 "https://api.github.com/repos/" <> T.unpack (repoFullName repo) <>
+                 "/issues?state=open&sort=updated&direction=asc&per_page=" ++
+                 show perpage ++ "&page=" ++ show page))
          repos)
   mapM_
-    (\(String title, String url, String updated) ->
-       T.putStrLn (T.unlines [title, url, updated]))
+    (\issue ->
+       T.putStrLn
+         (T.unlines
+            [ issueTitle issue
+            , issueHtmlUrl issue
+            , T.pack (show (issueUpdatedAt issue))
+            ]))
     issues
 
-getWantedRepo ::Config -> HM.HashMap Text Value -> Maybe Text
-getWantedRepo config result =
-  case HM.lookup "full_name" result of
-    Just (String fullName) ->
-      if any
-           (\ignored ->
-              if T.isSuffixOf "/" ignored
-                then T.isPrefixOf ignored fullName
-                else ignored == fullName)
-           (configIgnore config) ||
-         HM.lookup "archived" result == Just (Bool True) ||
-         HM.lookup "private" result == Just (Bool True)
-        then Nothing
-        else Just fullName
-    _ -> Nothing
+isIgnoredRepo ::Config -> Repo -> Bool
+isIgnoredRepo config repo =
+  any
+    (\ignored ->
+       if T.isSuffixOf "/" ignored
+         then T.isPrefixOf ignored (repoFullName repo)
+         else ignored == (repoFullName repo))
+    (configIgnore config) ||
+  repoArchived repo ||
+  repoPrivate repo
 
-getCachedResource :: Config -> FilePath -> (Int -> Int -> String) -> IO [Object]
+getCachedResource :: (FromJSON v, ToJSON v) => Config -> FilePath -> (Int -> Int -> String) -> IO [v]
 getCachedResource config cachefile mkurl = do
   exists <- doesFileExist cachefile
   if exists
@@ -116,7 +148,7 @@ getCachedResource config cachefile mkurl = do
       L.writeFile cachefile (encode results)
       pure results
 
-downloadPaginated :: (ByteString,ByteString) -> (Int -> Int -> String) -> IO [Object]
+downloadPaginated :: FromJSON v => (ByteString,ByteString) -> (Int -> Int -> String) -> IO [v]
 downloadPaginated auth makeUrl = do
   manager <- newManager tlsManagerSettings
   go manager 1 []
