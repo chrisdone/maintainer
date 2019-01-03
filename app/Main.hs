@@ -175,10 +175,9 @@ main = do
                      , T.pack (show (issueUpdatedAt issue))
                      ]))
              (take 1 is))
-        (dashboardIssues config issues)
+        (take (configLimit config) (dashboardIssues config issues))
   where
-    dashboardIssues config =
-      take (configLimit config) .
+    dashboardIssues _config =
       sortBy (comparing (map issueUpdatedAt . snd)) .
       map (second (take 1 . sortBy (comparing issueUpdatedAt))) .
       filter (not . null . snd)
