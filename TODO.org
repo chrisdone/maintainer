@@ -2,5 +2,7 @@
   CLOSED: [2018-12-29 Sat 23:41]
   - State "DONE"       from "TODO"       [2018-12-29 Sat 23:41]
 * TODO Ignore issues for which I am not the assignee
-* TODO Support commands that summarize the "health" of your different repos (judged by staleness of issues)
+* DONE Support commands that summarize the "health" of your different repos (judged by staleness of issues)
+  CLOSED: [2018-12-30 Sun 18:33]
+  - State "DONE"       from "TODO"       [2018-12-30 Sun 18:33]
 * TODO Support convenient re-caching of issue data (maybe just refresh the cache once per day?)

@@ -6,6 +6,7 @@ module Main where
 
 import           Data.Aeson
 import           Data.Aeson.Types
+import           Data.Bifunctor
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
@@ -106,15 +107,7 @@ main = do
            (repo, )
            (getCachedResource
               config
-              ("data/issues." <>
-               T.unpack
-                 (T.map
-                    (\c ->
-                       if isAlphaNum c
-                         then c
-                         else '.')
-                    (repoFullName repo)) <>
-               ".json")
+              (repoIssuesFilename repo)
               (\perpage page ->
                  "https://api.github.com/repos/" <> T.unpack (repoFullName repo) <>
                  "/issues?state=open&sort=updated&direction=asc&per_page=" ++
@@ -123,6 +116,12 @@ main = do
   args <- getArgs
   now <- fmap utctDay getCurrentTime
   case args of
+    ["refresh"] -> do
+      mapM_
+        (\(repo, _) -> do
+           putStrLn ("Removing " ++ repoIssuesFilename repo)
+           removeFile (repoIssuesFilename repo))
+        (dashboardIssues config issues)
     ["health"] ->
       putStrLn
         (tablize
@@ -176,11 +175,25 @@ main = do
                      , T.pack (show (issueUpdatedAt issue))
                      ]))
              (take 1 is))
-        (take
-           (configLimit config)
-           (sortBy
-              (comparing (map issueUpdatedAt . snd))
-              (filter (not . null . snd) issues)))
+        (dashboardIssues config issues)
+  where
+    dashboardIssues config =
+      take (configLimit config) .
+      sortBy (comparing (map issueUpdatedAt . snd)) .
+      map (second (take 1 . sortBy (comparing issueUpdatedAt))) .
+      filter (not . null . snd)
+
+repoIssuesFilename :: Repo -> String
+repoIssuesFilename repo =
+  "data/issues." <>
+  T.unpack
+    (T.map
+       (\c ->
+          if isAlphaNum c
+            then c
+            else '.')
+       (repoFullName repo)) <>
+  ".json"
 
 -- | Make a table out of a list of rows.
 tablize :: [[(Bool,String)]] -> String
