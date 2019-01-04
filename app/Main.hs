@@ -116,12 +116,16 @@ main = do
   args <- getArgs
   now <- fmap utctDay getCurrentTime
   case args of
-    ["refresh"] -> do
+    ("refresh":projects) -> do
       mapM_
         (\(repo, _) -> do
            putStrLn ("Removing " ++ repoIssuesFilename repo)
            removeFile (repoIssuesFilename repo))
-        (dashboardIssues config issues)
+        (if null projects
+           then (dashboardIssues config issues)
+           else filter
+                  (\(repo, _) -> elem (repoFullName repo) (map T.pack projects))
+                  (dashboardIssues config issues))
     ["health"] ->
       putStrLn
         (tablize
@@ -172,7 +176,10 @@ main = do
                   (T.unlines
                      [ issueTitle issue
                      , issueHtmlUrl issue
-                     , T.pack (show (issueUpdatedAt issue))
+                     , T.pack (show (issueUpdatedAt issue)) <>
+                       (if diffDays now (issueUpdatedAt issue) > configStalenessDays config
+                           then " (STALE)"
+                           else " (alive)")
                      ]))
              (take 1 is))
         (take (configLimit config) (dashboardIssues config issues))
