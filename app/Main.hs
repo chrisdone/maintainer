@@ -137,7 +137,7 @@ main = do
          tablize
            ([ (True, "Repo")
             , (True, "Staleness")
-            , (True, " Issues")
+            , (True, "Issues")
             , (True, "Stale Issues")
             , (True, "Avg. last update")
             ] :
