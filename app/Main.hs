@@ -169,10 +169,7 @@ main = do
               (sortBy
                  (flip (comparing (length . snd)))
                  (filter
-                    (\(_, rissues) ->
-                       all
-                         (noAssigneeOrMe config)
-                         rissues)
+                    (\(_, rissues) -> any (noAssigneeOrMe config) rissues)
                     (filter
                        (if configHideIssueless config
                           then not . null . snd
@@ -193,7 +190,7 @@ main = do
                           then " (STALE)"
                           else " (alive)")
                      ]))
-             (take 1 is))
+             (take 1 (filter (noAssigneeOrMe config) is)))
         (take (configLimit config) (dashboardIssues config issues))
   where
     dashboardIssues _config =
@@ -204,8 +201,9 @@ main = do
 noAssigneeOrMe :: Config -> Issue -> Bool
 noAssigneeOrMe config issue =
   if configAssigneeCheck config
-     then null (issueAssignees issue) || elem (T.decodeUtf8 (configUsername config)) (issueAssignees issue)
-     else True
+    then null (issueAssignees issue) ||
+         elem (T.decodeUtf8 (configUsername config)) (issueAssignees issue)
+    else True
 
 repoIssuesFilename :: Repo -> String
 repoIssuesFilename repo =
