@@ -15,6 +15,7 @@ import           Data.List
 import           Data.Ord
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import           Data.Time
 import           Data.Yaml (decodeFileThrow)
@@ -69,6 +70,7 @@ data Issue = Issue
   { issueTitle :: !Text
   , issueHtmlUrl :: !Text
   , issueUpdatedAt :: !Day
+  , issueAssignees :: [Text]
   } deriving (Show)
 
 instance FromJSON Issue where
@@ -78,7 +80,7 @@ instance FromJSON Issue where
       (do v <- o .: "updated_at"
           case parseTimeM True defaultTimeLocale "%Y-%m-%d" (take 10 v) of
             Just u -> pure u
-            Nothing -> fail "Couldn't parse date.")
+            Nothing -> fail "Couldn't parse date.") <*> (o .: "assignees" >>= mapM (.: "login"))
 
 instance ToJSON Issue where
   toJSON Issue {..} =
@@ -86,6 +88,7 @@ instance ToJSON Issue where
       [ "title" .= issueTitle
       , "html_url" .= issueHtmlUrl
       , "updated_at" .= formatTime defaultTimeLocale "%Y-%m-%d" issueUpdatedAt
+      , "assignees" .= map (\a -> object ["login" .= a]) issueAssignees
       ]
 
 main :: IO ()
@@ -128,11 +131,12 @@ main = do
                   (dashboardIssues config issues))
     ["health"] ->
       putStrLn
-        (tablize
+        ("Repositories with open issues assigned to you or unassigned\n\n" ++
+         tablize
            ([ (True, "Repo")
             , (True, "Staleness")
-            , (True, "Issues")
-            , (True, "Stale issues")
+            , (True, " Issues")
+            , (True, "Stale Issues")
             , (True, "Avg. last update")
             ] :
             map
@@ -163,10 +167,15 @@ main = do
               (sortBy
                  (flip (comparing (length . snd)))
                  (filter
-                    (if configHideIssueless config
-                       then not . null . snd
-                       else const True)
-                    issues))))
+                    (\(_, rissues) ->
+                       all
+                         (noIssuesOrMeAssign config)
+                         rissues)
+                    (filter
+                       (if configHideIssueless config
+                          then not . null . snd
+                          else const True)
+                       issues)))))
     _ ->
       mapM_
         (\(_repo, is) ->
@@ -177,9 +186,10 @@ main = do
                      [ issueTitle issue
                      , issueHtmlUrl issue
                      , T.pack (show (issueUpdatedAt issue)) <>
-                       (if diffDays now (issueUpdatedAt issue) > configStalenessDays config
-                           then " (STALE)"
-                           else " (alive)")
+                       (if diffDays now (issueUpdatedAt issue) >
+                           configStalenessDays config
+                          then " (STALE)"
+                          else " (alive)")
                      ]))
              (take 1 is))
         (take (configLimit config) (dashboardIssues config issues))
@@ -188,6 +198,11 @@ main = do
       sortBy (comparing (map issueUpdatedAt . snd)) .
       map (second (take 1 . sortBy (comparing issueUpdatedAt))) .
       filter (not . null . snd)
+
+noIssuesOrMeAssign :: Config -> Issue -> Bool
+noIssuesOrMeAssign config issue =
+  null (issueAssignees issue) ||
+  elem (T.decodeUtf8 (configUsername config)) (issueAssignees issue)
 
 repoIssuesFilename :: Repo -> String
 repoIssuesFilename repo =
@@ -233,9 +248,9 @@ getCachedResource config cachefile mkurl = do
   if exists
     then do
       bytes <- L.readFile cachefile
-      case decode bytes of
-        Just as -> pure as
-        Nothing -> error "Couldn't read repos.json. Delete it?"
+      case eitherDecode bytes of
+        Right as -> pure as
+        Left e -> error ("Couldn't read " ++ cachefile ++ e)
     else do
       results <-
         downloadPaginated (configUsername config, configToken config) mkurl
