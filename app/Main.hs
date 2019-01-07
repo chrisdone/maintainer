@@ -33,6 +33,7 @@ data Config = Config
   , configLimit :: Int
   , configHideIssueless :: Bool
   , configStalenessDays :: Integer
+  , configAssigneeCheck :: Bool
   }
 
 instance FromJSON Config where
@@ -42,7 +43,8 @@ instance FromJSON Config where
       (o .: "ignore") <*>
       o .: "display-limit" <*>
       o .: "hide-issueless" <*>
-      o .: "staleness-days"
+      o .: "staleness-days" <*>
+      o .: "assignee-check"
 
 data Repo = Repo
   { repoPrivate :: !Bool
@@ -169,7 +171,7 @@ main = do
                  (filter
                     (\(_, rissues) ->
                        all
-                         (noIssuesOrMeAssign config)
+                         (noAssigneeOrMe config)
                          rissues)
                     (filter
                        (if configHideIssueless config
@@ -199,10 +201,11 @@ main = do
       map (second (take 1 . sortBy (comparing issueUpdatedAt))) .
       filter (not . null . snd)
 
-noIssuesOrMeAssign :: Config -> Issue -> Bool
-noIssuesOrMeAssign config issue =
-  null (issueAssignees issue) ||
-  elem (T.decodeUtf8 (configUsername config)) (issueAssignees issue)
+noAssigneeOrMe :: Config -> Issue -> Bool
+noAssigneeOrMe config issue =
+  if configAssigneeCheck config
+     then null (issueAssignees issue) || elem (T.decodeUtf8 (configUsername config)) (issueAssignees issue)
+     else True
 
 repoIssuesFilename :: Repo -> String
 repoIssuesFilename repo =
